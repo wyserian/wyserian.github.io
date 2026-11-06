@@ -1,0 +1,6 @@
+# Security contact for wyserian.github.io (RFC 9116)
+# Found a vulnerability on this site or in one of my projects? Please report it privately.
+Contact: mailto:mandar108@protonmail.com
+Expires: 2027-11-01T00:00:00.000Z
+Preferred-Languages: en
+Canonical: https://wyserian.github.io/.well-known/security.txt
