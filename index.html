@@ -83,6 +83,11 @@
             } catch (e) {
                 document.documentElement.setAttribute('data-theme', 'dark');
             }
+            // boot log plays once per browser session, never for reduced-motion users
+            try {
+                if (!sessionStorage.getItem('booted') && !matchMedia('(prefers-reduced-motion: reduce)').matches)
+                    document.documentElement.classList.add('booting');
+            } catch (e) {}
         })();
     </script>
     <style>
@@ -108,17 +113,23 @@
         }
 
         :root[data-theme="light"] {
-            --bg:          #fbfbfc;
-            --surface:     #f1f3f6;
-            --surface-2:   #e8ebf0;
-            --line:        rgba(17, 20, 26, 0.09);
-            --text:        #11141a;
-            --muted:       #4a505c;
-            --dim:         #6b7280;
-            --accent:      #2f6fe0;
-            --accent-btn:  #2f6fe0;
-            --term-green:  #15803d;
+            /* layered: cool-gray page, white cards, darker chips; text tuned for AA contrast on all three */
+            --bg:          #eceff4;
+            --surface:     #ffffff;
+            --surface-2:   #e2e7ee;
+            --line:        rgba(15, 23, 42, 0.12);
+            --text:        #0b1220;
+            --muted:       #384152;
+            --dim:         #576072;
+            --accent:      #1f5fd6;
+            --accent-btn:  #1f5fd6;
+            --term-green:  #11743a;
         }
+        /* white cards on the gray page get a soft lift instead of a border */
+        :root[data-theme="light"] :is(.fact, .exp-card, .proj-card, .contact-card) {
+            box-shadow: 0 1px 2px rgba(15, 23, 42, 0.06), 0 4px 14px -6px rgba(15, 23, 42, 0.10);
+        }
+        :root[data-theme="light"] .chips li { background: var(--surface); box-shadow: 0 1px 2px rgba(15, 23, 42, 0.06); }
 
         html { scroll-behavior: smooth; -webkit-text-size-adjust: 100%; }
 
@@ -208,7 +219,18 @@
             padding: 0.5rem 0; margin-right: auto;
         }
         .wordmark .dot { color: var(--accent); }
-        nav.top { display: flex; gap: 0.25rem; }
+        /* nav lives behind the menu button at every size (the tmux bar covers it on desktop) */
+        nav.top { display: none; flex-direction: column; gap: 0.25rem; }
+        header.menu-open nav.top { display: flex; animation: menu-in 0.2s var(--ease); }
+        @media (min-width: 681px) {
+            .head-inner { position: relative; }
+            nav.top {
+                /* right edge lines up with the menu button: .wrap's 2rem padding minus the button's -0.4rem margin */
+                position: absolute; top: calc(100% - 0.35rem); right: 1.6rem; min-width: 220px; padding: 0.45rem;
+                border-radius: 12px; background: var(--surface); box-shadow: 0 18px 50px rgba(0, 0, 0, 0.35);
+            }
+            header nav.top a { min-height: 40px; padding: 0 0.8rem; font-size: 0.86rem; }
+        }
         nav.top a {
             display: inline-flex; align-items: center; min-height: 36px; padding: 0 0.7rem;
             font-family: var(--mono); font-size: 0.8rem; letter-spacing: 0.02em;
@@ -234,9 +256,9 @@
         :root[data-theme="light"] .toggle .sun { display: none; }
         :root[data-theme="light"] .toggle .moon { display: inline; }
 
-        /* Mobile menu button (shown only on small screens) */
+        /* Menu button (all screen sizes) */
         .menu-btn {
-            display: none; align-items: center; justify-content: center;
+            display: inline-flex; align-items: center; justify-content: center;
             width: 40px; height: 40px; margin-right: -0.4rem; border-radius: 8px;
             border: none; background: none; color: var(--text); cursor: pointer;
             transition: background 0.2s, transform 0.15s;
@@ -622,7 +644,7 @@
         .term-out { flex: 1; overflow-y: auto; padding: 0.9rem 1rem; overscroll-behavior: contain; }
         /* keep spacing only in the output lines (not the markup whitespace around the prompt) */
         #term-out { white-space: pre-wrap; word-break: break-word; }
-        .term-out .t-cmd { color: var(--t-text); margin-top: 0.35rem; }
+        .term-out .t-cmd { color: var(--t-text); }
         .term-out .t-muted { color: var(--t-muted); }
         .term-out .t-ok { color: var(--t-green); }
         .term-out .t-err { color: var(--t-err); }
@@ -630,13 +652,33 @@
         .term-out a { color: var(--t-blue); text-decoration: underline; text-underline-offset: 2px; }
         .term-out a:hover { color: var(--t-text); }
         .term .p-user { color: var(--t-green); }
+        .term.root .p-user { color: var(--t-err); }
         .term .p-path { color: var(--t-blue); }
         .term-line { display: flex; align-items: center; gap: 0.6ch; padding-top: 0.35rem; white-space: normal; }
         .term-line .term-prompt { flex-shrink: 0; color: var(--t-muted); }
+        .term-line.busy { opacity: 0; } /* prompt hides while a command is "running" */
+        .term-line.secret input { color: transparent; } /* password prompt: typed text stays invisible */
+        .term-line.secret input::selection { background: transparent; }
+        .term-input-wrap { position: relative; flex: 1; min-width: 0; display: flex; }
         .term-line input {
-            flex: 1; min-width: 0; border: none; outline: none; background: transparent;
-            color: var(--t-text); caret-color: var(--t-green); font: inherit;
+            flex: 1; width: 100%; min-width: 0; border: none; outline: none; background: transparent;
+            color: var(--t-text); caret-color: transparent; font: inherit;
         }
+        /* block cursor: follows the real caret, shows the character under it inverted */
+        .term-cursor {
+            position: absolute; top: 50%; height: 1.15em; line-height: 1.15em; transform: translateY(-50%);
+            width: 1ch; pointer-events: none; white-space: pre;
+            left: calc(var(--col, 0) * 1ch - var(--scroll, 0px));
+            background: var(--t-green); color: var(--t-bg);
+            animation: blink 1.05s steps(1) infinite;
+        }
+        .term-cursor.typing { animation: none; }
+        .term-input-wrap:not(:focus-within) .term-cursor {
+            background: transparent; color: transparent; animation: none;
+            box-shadow: inset 0 0 0 1px var(--t-green);
+        }
+        .term.root .term-cursor { background: var(--t-err); }
+        .term.root .term-input-wrap:not(:focus-within) .term-cursor { background: transparent; box-shadow: inset 0 0 0 1px var(--t-err); }
         .label-caret { width: 0.55em; height: 1em; margin-left: 0.1em; }
 
         /* ── Tablet ── */
@@ -649,14 +691,11 @@
         @media (max-width: 680px) {
             .wrap { padding: 0 1.25rem; }
             .head-inner { gap: 0.25rem; }
-            .menu-btn { display: inline-flex; }
             nav.top {
-                display: none; position: absolute; top: 100%; left: 0; right: 0;
-                flex-direction: column; gap: 0.25rem; padding: 0.5rem 1.25rem 1rem;
+                position: absolute; top: 100%; left: 0; right: 0; padding: 0.5rem 1.25rem 1rem;
                 background: var(--bg); border-bottom: 1px solid var(--line);
             }
             header.menu-open { border-bottom-color: var(--line); }
-            header.menu-open nav.top { display: flex; animation: menu-in 0.2s var(--ease); }
             nav.top a { min-height: 42px; padding: 0 0.8rem; font-size: 0.92rem; }
             .hero { padding: 2rem 0 4.5rem; }
             .roles { font-size: 1.05rem; }
@@ -667,7 +706,7 @@
             .proj-card { padding: 1rem 1.05rem; }
             .modal { padding: 0; }
             .term { padding: 0; }
-            .term-window { width: 100%; height: 100%; border-radius: 0; }
+            .term-window { width: 100%; height: 100%; border-radius: 0; font-size: 0.8rem; }
             .modal-card { width: 100%; height: 100%; border-radius: 0; border: 0; }
             /* icon-only download button; label stays readable to screen readers */
             .modal-link { width: 36px; padding: 0; justify-content: center; }
@@ -690,12 +729,75 @@
             html { scroll-behavior: auto; }
             *, *::before, *::after { transition-duration: 0.01ms !important; animation-duration: 0.01ms !important; }
             html.js .reveal { opacity: 1 !important; animation: none !important; }
-            .caret, .live-dot { animation: none !important; }
+            .caret, .live-dot, .term-cursor { animation: none !important; }
             .hex-rain { display: none; }
         }
+
+        /* ── Hacker extras ── */
+        ::selection { background: color-mix(in srgb, var(--term-green) 32%, transparent); color: var(--text); }
+
+        /* phosphor: green-on-black monochrome CRT (terminal: `theme phosphor`) */
+        :root[data-theme="phosphor"] {
+            --bg: #020904; --surface: #061409; --surface-2: #0b2011; --line: rgba(57, 255, 106, 0.14);
+            --text: #8dffaa; --muted: #5fd884; --dim: #3f9e5c;
+            --accent: #39ff6a; --accent-btn: #126b2c; --term-green: #39ff6a;
+            --sans: ui-monospace, "SF Mono", "JetBrains Mono", "Cascadia Code", Menlo, Consolas, monospace;
+        }
+        :root[data-theme="phosphor"] body { text-shadow: 0 0 3px color-mix(in srgb, var(--accent) 40%, transparent); }
+        :root[data-theme="phosphor"] .hero h1 { text-shadow: none; }
+
+        /* tmux-style status bar (desktop only) */
+        .tmux {
+            position: fixed; left: 0; right: 0; bottom: 0; z-index: 30;
+            display: flex; align-items: center; gap: 1rem; height: 26px; padding-right: 0.9rem;
+            font-family: var(--mono); font-size: 0.72rem; color: var(--muted);
+            background: color-mix(in srgb, var(--surface-2) 92%, transparent);
+            backdrop-filter: blur(8px); border-top: 1px solid var(--line);
+        }
+        .tm-sess { align-self: stretch; display: flex; align-items: center; padding: 0 0.75rem; font-weight: 700; color: var(--bg); background: var(--term-green); }
+        .tm-wins { display: flex; gap: 0.9rem; min-width: 0; overflow: hidden; }
+        .tm-wins a { color: var(--dim); white-space: nowrap; transition: color 0.2s; }
+        .tm-wins a:hover, .tm-wins a.active { color: var(--text); }
+        .tm-wins a.active::after { content: "*"; color: var(--term-green); }
+        .tm-right { margin-left: auto; display: flex; gap: 0.9rem; white-space: nowrap; font-variant-numeric: tabular-nums; }
+        @media (min-width: 861px) { body { padding-bottom: 26px; } }
+        @media (max-width: 860px) { .tmux { display: none; } }
+
+        /* boot log, first visit per session; always a dark console */
+        .boot { display: none; }
+        html.booting .boot {
+            display: block; position: fixed; inset: 0; z-index: 200; overflow: hidden;
+            padding: clamp(1rem, 4vw, 2.5rem); background: #050608; color: #b9c0cc;
+            font-family: var(--mono); font-size: 0.8rem; line-height: 1.6; white-space: pre-wrap; cursor: pointer;
+            transition: opacity 0.3s;
+        }
+        html.booting body { overflow: hidden; }
+        .boot.done { opacity: 0; }
+        .boot .ok { color: #3ecf8e; } .boot .warn { color: #f5b544; } .boot .ts { color: #5d6573; }
+        .boot-skip { position: absolute; right: 1rem; bottom: 1rem; font-size: 0.72rem; color: #5d6573; }
+        @media (max-width: 680px) { html.booting .boot { font-size: 0.7rem; } }
+
+        /* vim keys cheat sheet */
+        .keys {
+            margin: auto; width: min(380px, calc(100% - 2rem)); padding: 1.2rem 1.4rem;
+            border: none; border-radius: 14px; background: var(--surface); color: var(--text);
+            font-family: var(--mono); font-size: 0.84rem; box-shadow: 0 24px 80px rgba(0, 0, 0, 0.45);
+        }
+        .keys::backdrop { background: rgba(5, 7, 10, 0.55); backdrop-filter: blur(3px); }
+        .keys h2 { margin-bottom: 0.8rem; font-size: 0.74rem; font-weight: 500; letter-spacing: 0.08em; text-transform: uppercase; color: var(--dim); }
+        .keys dl { display: grid; grid-template-columns: max-content 1fr; gap: 0.45rem 1.2rem; }
+        .keys dt { color: var(--accent); }
+        .keys dd { color: var(--muted); }
+        .keys-foot { margin-top: 1rem; font-size: 0.72rem; color: var(--dim); }
+
+        /* ASCII banner in the terminal */
+        .term-out .t-banner { white-space: pre; overflow: hidden; font-size: 0.68em; line-height: 1.05; color: var(--t-green); }
+        .term-out .t-banner.t-err { color: var(--t-err); }
     </style>
 </head>
 <body>
+<!-- build 2026.11 · cache-key: 777973657269616e7b763133775f7330757263335f31735f737433705f7a3372307d -->
+    <div class="boot" id="boot" aria-hidden="true"><div id="boot-log"></div><span class="boot-skip">press any key to skip</span></div>
 
     <div class="sr-only" id="sr-status" aria-live="polite"></div>
 
@@ -750,7 +852,7 @@
                     <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M19 12l-7 7-7-7"/></svg>
                 </a>
             </div>
-            <p class="live" aria-hidden="true"><span class="live-dot"></span>live · Mumbai, IN · <span id="live-clock">--:--:--</span> IST<span class="live-hint"> · press <kbd>`</kbd> for terminal</span></p>
+            <p class="live" aria-hidden="true"><span class="live-dot"></span>live · Mumbai, IN · <span id="live-clock">--:--:--</span> IST<span class="live-hint"> · press <kbd>`</kbd> for terminal · <kbd>?</kbd> for keys</span></p>
         </section>
 
         <!-- ABOUT -->
@@ -1080,12 +1182,36 @@
                 <div id="term-out" role="log" aria-live="polite"></div>
                 <form class="term-line" id="term-form" autocomplete="off">
                     <span class="term-prompt" aria-hidden="true"><span class="p-user">wyserian@kali</span>:<span class="p-path">~</span>$</span>
-                    <input id="term-input" type="text" aria-label="Terminal command. Type help for a list."
-                           spellcheck="false" autocapitalize="off" autocomplete="off" enterkeyhint="send">
+                    <span class="term-input-wrap">
+                        <input id="term-input" type="text" aria-label="Terminal command. Type help for a list."
+                               spellcheck="false" autocapitalize="off" autocomplete="off" enterkeyhint="send">
+                        <span class="term-cursor" id="term-cursor" aria-hidden="true"></span>
+                    </span>
                 </form>
             </div>
         </div>
     </div>
+
+    <!-- tmux-style status bar: a mouse shortcut that mirrors the nav, so it stays out of the tab order -->
+    <div class="tmux" aria-hidden="true">
+        <span class="tm-sess">[wyserian]</span>
+        <span class="tm-wins">
+            <a href="#home" tabindex="-1">0:home</a><a href="#about" tabindex="-1">1:about</a><a href="#experience" tabindex="-1">2:experience</a><a href="#skills" tabindex="-1">3:skills</a><a href="#projects" tabindex="-1">4:projects</a><a href="#contact" tabindex="-1">5:contact</a>
+        </span>
+        <span class="tm-right"><span id="tm-pct">0%</span><span><span id="tm-clock">--:--</span> IST</span></span>
+    </div>
+
+    <dialog class="keys" id="keys" aria-labelledby="keys-title">
+        <h2 id="keys-title">Keyboard</h2>
+        <dl>
+            <dt>j / k</dt><dd>next / previous section</dd>
+            <dt>gg / G</dt><dd>top / bottom</dd>
+            <dt>: or `</dt><dd>open the terminal</dd>
+            <dt>?</dt><dd>this cheat sheet</dd>
+            <dt>Esc</dt><dd>close</dd>
+        </dl>
+        <p class="keys-foot">vim users, you're home.</p>
+    </dialog>
 
     <script>
         var root = document.documentElement;
@@ -1121,19 +1247,22 @@
             toggle.setAttribute('aria-label', light ? 'Switch to dark theme' : 'Switch to light theme');
         }
         syncToggleLabel();
-        toggle.addEventListener('click', function () {
-            var next = root.getAttribute('data-theme') === 'light' ? 'dark' : 'light';
-            root.setAttribute('data-theme', next);
-            try { localStorage.setItem('theme', next); } catch (e) {}
+        function setTheme(t) { // dark | light | phosphor
+            root.setAttribute('data-theme', t);
+            try { localStorage.setItem('theme', t); } catch (e) {}
             syncToggleLabel();
+        }
+        toggle.addEventListener('click', function () {
+            setTheme(root.getAttribute('data-theme') === 'light' ? 'dark' : 'light');
         });
 
 
         // Scroll progress bar
-        var progress = document.getElementById('progress');
+        var progress = document.getElementById('progress'), tmPct = document.getElementById('tm-pct');
         function updateProgress() {
-            var max = root.scrollHeight - root.clientHeight;
-            progress.style.transform = 'scaleX(' + (max > 0 ? root.scrollTop / max : 0) + ')';
+            var max = root.scrollHeight - root.clientHeight, f = max > 0 ? root.scrollTop / max : 0;
+            progress.style.transform = 'scaleX(' + f + ')';
+            tmPct.textContent = Math.round(f * 100) + '%';
         }
         updateProgress();
         window.addEventListener('scroll', updateProgress, { passive: true });
@@ -1170,7 +1299,7 @@
         // Highlight the nav link for the section in view
         (function () {
             if (!hasIO) return;
-            var links = document.querySelectorAll('nav.top a');
+            var links = document.querySelectorAll('nav.top a, .tm-wins a');
             var spy = new IntersectionObserver(function (entries) {
                 entries.forEach(function (e) {
                     if (!e.isIntersecting) return;
@@ -1225,10 +1354,54 @@
             var fmt = new Intl.DateTimeFormat('en-GB', {
                 timeZone: 'Asia/Kolkata', hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false
             });
-            function tick() { clock.textContent = fmt.format(new Date()); }
+            var tmClock = document.getElementById('tm-clock');
+            function tick() { var t = fmt.format(new Date()); clock.textContent = t; tmClock.textContent = t.slice(0, 5); }
             tick();
             setInterval(tick, 1000);
         })();
+
+        // Boot log: about four seconds of kernel-style lines on the first visit of a session.
+        // Any key or click skips it. bootDone resolves when the page is uncovered.
+        var bootDone = new Promise(function (resolve) {
+            var boot = document.getElementById('boot');
+            if (!root.classList.contains('booting')) return resolve();
+            try { sessionStorage.setItem('booted', '1'); } catch (e) {}
+            var log = document.getElementById('boot-log'), timer = 0, finished = false;
+            var L = [
+                ['ts', '[    0.000000] ', '', 'Linux version 6.6.6-wyserian (root@kali) #1 SMP PREEMPT_DYNAMIC'],
+                ['ts', '[    0.004211] ', '', 'Command line: BOOT_IMAGE=/vmlinuz root=/dev/portfolio ro quiet'],
+                ['ts', '[    0.118734] ', '', 'Mounting /home/wyserian ...'],
+                ['ok', '[  OK  ] ', '', 'Mounted /home/wyserian/projects.'],
+                ['ok', '[  OK  ] ', '', 'Started Hex Rain Generator.'],
+                ['ok', '[  OK  ] ', '', 'Started Network Scanner (nmap.service).'],
+                ['ok', '[  OK  ] ', '', 'Started Interactive Shell on tty1.'],
+                ['warn', '[ WARN ] ', '', 'DEBUG=true in production. Someone should look into that.'],
+                ['ok', '[  OK  ] ', '', 'Reached target Curiosity.'],
+                ['ok', '[  OK  ] ', '', 'Reached target Graphical Interface.'],
+                ['', '', '', ''],
+                ['', '', '', 'wyserian login: visitor (automatic login)']
+            ];
+            function finish() {
+                if (finished) return;
+                finished = true;
+                clearTimeout(timer);
+                document.removeEventListener('keydown', skipKey, true);
+                boot.classList.add('done');
+                setTimeout(function () { root.classList.remove('booting'); boot.remove(); resolve(); }, 300);
+            }
+            var i = 0;
+            (function next() {
+                if (i === L.length) { timer = setTimeout(finish, 1000); return; }
+                var r = L[i++], d = document.createElement('div');
+                if (r[1]) { var s = document.createElement('span'); s.className = r[0]; s.textContent = r[1]; d.appendChild(s); }
+                d.appendChild(document.createTextNode(r[3] || ' '));
+                log.appendChild(d);
+                timer = setTimeout(next, 200 + Math.random() * 120); // slow enough to read each line
+            })();
+            function skipKey(e) { e.stopPropagation(); finish(); } // the skip key shouldn't also trigger shortcuts
+            boot.addEventListener('click', finish);
+            document.addEventListener('keydown', skipKey, true);
+        });
 
         // Name morph: letters cycle hex glyphs, then settle left to right into the target.
         // style 'fade': settle blue -> gradient (hero name); 'blue': stay blue (hex);
@@ -1342,7 +1515,8 @@
             var full = cmd.textContent, i = 0;
             cmd.textContent = '';
             function step(fn, ms) { introTimer = setTimeout(fn, ms); }
-            setTimeout(function type() { // typing runs on its own timer; only the reveal is cancellable
+            bootDone.then(function () { setTimeout(type, 450); }); // wait until the boot log is gone
+            function type() { // typing runs on its own timer; only the reveal is cancellable
                 cmd.textContent = full.slice(0, ++i);
                 if (i < full.length) return setTimeout(type, 75 + Math.random() * 60);
                 if (showingName || hovering) return;
@@ -1352,7 +1526,7 @@
                     setName(true);
                     step(function () { if (!hovering) setName(false); }, 1320 + 2600);
                 }, 950 + 500);
-            }, 450);
+            }
         })();
 
         // Hex rain on a canvas behind the hero; runs only while the hero is on screen
@@ -1473,6 +1647,7 @@
             var scroller = document.getElementById('term-scroll');
             var form = document.getElementById('term-form');
             var input = document.getElementById('term-input');
+            var cursor = document.getElementById('term-cursor');
             var termBtn = document.getElementById('term-btn');
             var regions = [head, document.getElementById('top')];
             var history = [], hIdx = 0, lastFocus = null, booted = false;
@@ -1482,15 +1657,34 @@
                 hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false
             });
 
-            // ---- output helpers ----
+            // ---- output: lines stream in one at a time, like a real process printing ----
+            var queue = [], pumping = false, LINE_MS = reduceMotion ? 0 : 12;
             function node(x) { return typeof x === 'string' ? document.createTextNode(x) : x; }
             function line(parts, cls) {
                 var d = document.createElement('div');
                 if (cls) d.className = cls;
                 [].concat(parts).forEach(function (x) { d.appendChild(node(x)); });
-                out.appendChild(d);
+                queue.push(d);
+                pump();
                 return d;
             }
+            function after(fn) { queue.push(fn); pump(); } // runs once everything queued before it is printed
+            function settle() { return new Promise(function (res) { after(res); }); }
+            function pump() {
+                if (pumping) return;
+                pumping = true;
+                (function step() {
+                    var item = queue.shift();
+                    if (item === undefined) { pumping = false; return; }
+                    if (typeof item === 'function') { item(); return step(); }
+                    out.appendChild(item);
+                    scrollEnd();
+                    setTimeout(step, LINE_MS);
+                })();
+            }
+            function dropOutput() { queue = queue.filter(function (q) { return typeof q === 'function'; }); }
+            function clearScreen() { dropOutput(); out.textContent = ''; }
+            function scrollEnd() { scroller.scrollTop = scroller.scrollHeight; }
             function span(text, cls) { var s = document.createElement('span'); s.className = cls; s.textContent = text; return s; }
             function link(text, href) {
                 var a = document.createElement('a');
@@ -1500,7 +1694,8 @@
             }
             function gap() { line(' '); }
             function txt(el) { return el ? el.textContent.replace(/\s+/g, ' ').trim() : ''; }
-            function pad(t, n) { return (t + '                    ').slice(0, Math.max(n, t.length + 1)); }
+            function pad(t, n) { return t + ' '.repeat(Math.max(n - t.length, 1)); }
+            function two(n) { return ('0' + n).slice(-2); }
             function factLines() {
                 document.querySelectorAll('#about .fact').forEach(function (f) {
                     var v = f.querySelector('.fact-v'), sub = v.querySelector('.sub');
@@ -1510,16 +1705,249 @@
                 });
             }
 
+            // ---- block cursor: follows the real caret and shows the character under it ----
+            var typingTimer = 0;
+            function syncCursor() {
+                if (pwAsk) { // password prompt: like real su, nothing moves while you type
+                    cursor.style.setProperty('--col', 0); cursor.style.setProperty('--scroll', '0px');
+                    cursor.textContent = ' ';
+                    return;
+                }
+                var pos = input.selectionStart == null ? input.value.length : input.selectionStart;
+                cursor.style.setProperty('--col', pos);
+                cursor.style.setProperty('--scroll', input.scrollLeft + 'px');
+                cursor.textContent = input.value.charAt(pos) || ' ';
+            }
+            function setInput(v) { input.value = v; input.setSelectionRange(v.length, v.length); syncCursor(); }
+            ['input', 'keyup', 'click', 'focus', 'select'].forEach(function (ev) { input.addEventListener(ev, syncCursor); });
+            input.addEventListener('input', function () {
+                cursor.classList.add('typing'); // solid while typing, blinks when idle
+                clearTimeout(typingTimer);
+                typingTimer = setTimeout(function () { cursor.classList.remove('typing'); }, 600);
+            });
+
+            // ---- CTF, ordered by severity. Only hashes live here: `hash` checks a submitted flag,
+            // `chk` checks a saved proof token (names, hints and the rest stay encoded in DATA) ----
+            var CTF = [
+                { sev: 'low'     , hash: 'a27f5a0593ebb98b9168907802475a6ad5bc34b543e055b76fcfe9ce7d932176', chk: '538ed22b372c1ed6a0e2e3b7e2632cf109438923fb6d238fa1e5a2da5002801f' },
+                { sev: 'low'     , hash: 'bba5d072dda09252ee43675c8b41937f2f111755e0974503a544141d57a494de', chk: '0f7901274f661f977dda0dae2654e8738b204834826157d0fb9d79431db0d2e7' },
+                { sev: 'medium'  , hash: '0612b6d133c2f2068510f0037ed2abb59fa66c415c8a23eaacdfc6ce838600ee', chk: 'c17c2fcdc1f2343a2d165c07e94b1c88a58ddc838b87c50451cbb56ebe6396cb' },
+                { sev: 'medium'  , hash: 'f8a16790e0460db3f072ea2e00a557aa571a50e7ef49a12210d73fd7a3b8b3e7', chk: '476c992b7dfb0c3223cc4b92d044a55aa2d8287c853b3786b0668e67f9c05c8d' },
+                { sev: 'high'    , hash: '715c87b59e31b1809d88d2fedce4bdc8e06cf6491bb953ae6b8900ecd42c995d', chk: '9e2586e8e06248f48ec80423979a2b171582f694060737850264c42ad95af2cd' },
+                { sev: 'critical', hash: '3b66a18d4c95e8196062a497bd44abd5f3daf966395cd6f7ef6233bc4dc6fe22', chk: 'c5bba1fb7f1703b35155a4cb66dd6ca35d2f372bc48895af4b74ed438e879868' },
+                { sev: 'hard'    , hash: '70f2ae1bac3c41b840ad4cd16c7731e33660906892f1d6f133545388c525d431', chk: '96d49d73de888594b86308034f18b8555d90e5a550bb9a6fcb84b33f8e280ff0' },
+                { sev: 'hard'    , hash: '429a6ef2dd6f94c6882be49b6d7e3664692eafb93dead8104694c7c40e0cf67e', chk: '6d73e7dfbf39490394ae3fcd4e8279c59dbfbebde04c5bdfa9c1c45ab56aaa22' },
+                { sev: 'hard'    , hash: '661694759a05bf44ff18c52de921d200e31006a260f6f916f9ee607becf8b99a', chk: '0038d5da0938915bd3df75fdaf44007314bfa15ce0e6c9b4541e8bca9d0e9443' },
+                { sev: 'insane'  , hash: 'a66cf55f8d05af3821659efcd2513d486beab43b1129968bb8fb24482b9697c7', chk: '5b167e84f4342bf09381f0046b8a784c8e5d5320f637cd5c01562e87acb082ad' }
+            ];
+            var ACT1 = 6; // the first six earn root; root's notes open act II
+            var ROOT_HASH = '7a419d6313cb002df4c6fce608a17a7e474b2318a99ff028ae6e5f3942132414';
+            // hints, files and fake users, kept encoded so the page source doesn't spoil the game
+            var DATA = (function (blob, key) {
+                var b = atob(blob), o = '';
+                for (var i = 0; i < b.length; i++) o += String.fromCharCode(b.charCodeAt(i) ^ key.charCodeAt(i % key.length));
+                return JSON.parse(decodeURIComponent(escape(o)));
+            })('EEMCS1E6N0s9CAkeSzIDHBkCCUtHQx4MCA4CSzZNN0sjCAgNDg9MLwINCRpJTU4MBQIDDQIPC0s2TTdLGQ4OBh8SQh0TFU5FSRMJCgQPTjRHOk4tDgMZDkstCQgAQ0BLAg8KBksNCQgAQzFFMEMlLSQzTkVJAA8KDhIfSQgVAEs2TTdLITY4S0dDDRwfCU40RzpOJQQWTCsCFR9LR0MfHQ4GA0s2TTdLJA8FBgVDQEsODw8GDwgCDkk8QDJJMwUNDw0JSSYETkVJAh4QGxUDSzZNN0s9BB4aAg4CGklNThsOAgMHSTwxRUkJTlMwQyIGH0EJHw4TFR0DCAIOSw4CSQpBHAgMBEwAGEEBDAoPGEkfDkwLDkEfDA4PQkk4DgEMSw4KSQIVTAAYD0sdSwQaDAVBAQwKDxhJHw5MCw5BHgwKBUwIGEEYDBMVQktHQz8GBgRMDwINCRpLFgMcBwVMGwoVBAwZQQIGH0EODEsNBRofBAhHSyAfAksHAxtLBBoMGRgYAQIPC0VLFQQMBUEIBgVGGEkfExkaH0EbAQoVTAUEDgcaSw0FAg5BAgYCEglHSU1OPgMAGEkfCQlJCQ4YGksAHgxLFQMFD0EYBksICwcEEwlJAhJMDBMADx0HGEweAwQeDEsATAEeDA0HSxIEBh4NCEkHDgMCRUNASy8EGgwHDhwMGRJMBQ4AGgxLBQMGGRJMBhsEAkkcCQUFDkEYAQ4YTA0OAxkORUEtB0sEARkOEwMbTBJMBgcFTB0ZCA8CSwoJDBsSTB0DBEwaDgIeDB9NTAsKBQAQRUNASz8JBRpLEgQMBw1MCgoPTB0KDQdJHw5MHQMETCg7KEwFAgoJSQoPFUkEFQQMGUEPBQIEAh1FQTUGHkENGw5BXVpYVkJJPAkDSRwAH0kDBB4MSwcFGxgVU0tHQzUGHhNMCxkOGxoOE0wAGEEPCBkTFQAFBkwISxENGhhPTChLEgUOBQAYHBkETAcEAwMNEkEPAQ4CBxpLCB9JARQfHUsFCQoEEw0dAg4CR0lNTihLEQUKHxQeDEsCDQdLEg0QSwwDGw5BGAEKD0wISxUEBh4SDQcPQRsGGQUfSQIHTBAEFEwbDgAISQIVTAYFBEwLAhVMCB9BDUkfCAEMRUNASzsECQVLCBhJBwgHDEsAAkkEDwUGBU9MLB0EHhBLDQ0QDhNMABhBDUkNDh4EChVMEAQUTAgHEwkIDxhMAgUOG0VLABwZBwgJDUsIAkkZBBoMGRIJR0lNTjoEDAlJDQgADBhBDRsOQRsMBw1MAgUOGwdQQQMdAwQeGksAHgxLFh4AHxUJB0sHAxtLCRkECg8fR0s1BAxLDgANSyceDAUCBEkICBwBDhNMBw4XCRtLEwkdAhMJDUVDQEs9BB4aAg4CGksVCQUHQQ1JGBUDGxJPTCMECAJJHwkJBEsVBAxLFg0QSwBMGgMEAAVLCwMABRJMCgQMAQgFBR9FSwACDUsNCR1LMiQoSwkNHw5BGAEOQQAIGBVMHgQTCEdJPEBLCQlOUzBDGwEEAAEASU1OBRhDQEsIABhJCgMDHB9DQEsfCQkEDkEAAAwJGEtHQxgBDgwJSQ8AHgJJTU4KHwdORUkCGRsHQUEaSw0DCgoNBAYYFVZRW1lcRgoRBUYdUEMcGAQeGkQMCUtHQw8FDgAeS0dDCRECFU40R0MfS1FDCFoHGzYxIRE1Pl5WNQM5GyETMlE0Ey0bNFtfFggvUxsOBCUYCTEpUSE9KRQKOFZcTkVJFE5TEENdS1EaTgdJW04IDwwFB0lNThtJW04IDwwFBwISGBsKFQMbSU1OAklbTgxaQxFFSVVeS1EaTgdJW04NDgQcRB8JAxwMCRhLR0MeS1FDAxsKAgAMSU1OHUlbTh0DBEwIBRIbDBlBBRpLVV5HSxUEDEsQGQwYFQUGBUEFGksSGAAHDUwFBAAIAAUGQksWTU5YWFJbS1EaTgdJW04fAhIFHQQTTkVJE05TSQYZDBgVTkVJFU5TSQ8DHQMIAg5LFQNJGAQJSQMEHgxJHBFFSQRdS1FDGDNEUgcDW04IJho1XDomDF49AzM4CwAUKF5cJQITRCUaASwNIiJYLSkwPCcjORwlXw5WXE5FSQReS1FDAxo9M1okAAYmJgkLKhgBNAosOC4PWyhXPjgKNT8dBigfLwQ0Lz0dUjgtHARORUkTAktROk5KSw8DHQ4SQEkPDkwHBBVMGgMIHEtHQ0FJBAZBAAYACwxFEQIOSxYNGksVAxwICQkNSwAKHQ4TTB0DBEwFChIYSQkUBQUPT0wdAwRMGQIZCQUYQQAGBApMHQMETBoKDAlSSxUEDEsNAx5LAwUdGEEIBgVGGEdJTU5ESxMJBA4MDgwZQRgGSwIADAoPTBwbQRsBChUJHw4TTAAYQQQADwgCDksIAkkfCQkbDkEODA0OHgxLDQ0cBQIER0lNTkRLVUwEBBMJSQ0NDQ4YQQ0PHwQeSR8JBRpLDgIMRUEJCAgJTAYFBEwFDgAIGksVA0kfCQlJBQQUHUVDMRQ=', 'kali');
+            function sha256(text) {
+                return crypto.subtle.digest('SHA-256', new TextEncoder().encode(text)).then(function (buf) {
+                    return [].map.call(new Uint8Array(buf), function (b) { return ('0' + b.toString(16)).slice(-2); }).join('');
+                });
+            }
+            // flags 4 and 5 are encrypted; the key comes from actually performing the exploit
+            function unlock(secret, b64) {
+                var enc = new TextEncoder();
+                return Promise.all([0, 1].map(function (n) {
+                    return crypto.subtle.digest('SHA-256', enc.encode(secret + '#' + n));
+                })).then(function (halves) {
+                    var ks = new Uint8Array(64), ct = atob(b64), s = '';
+                    ks.set(new Uint8Array(halves[0]), 0); ks.set(new Uint8Array(halves[1]), 32);
+                    for (var i = 0; i < ct.length; i++) s += String.fromCharCode(ct.charCodeAt(i) ^ ks[i]);
+                    return s;
+                });
+            }
+            function b64url(obj) { return btoa(JSON.stringify(obj)).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, ''); }
+            function unb64url(str) { str = str.replace(/-/g, '+').replace(/_/g, '/'); while (str.length % 4) str += '='; return JSON.parse(atob(str)); }
+            var hasCrypto = !!(window.crypto && crypto.subtle);
+            // progress: localStorage keeps proof tokens, sha256('ctf:' + flag), checked against chk = sha256(token).
+            // Writing indexes or copying hashes from this source proves nothing; a token needs the real flag.
+            var got = {}; // board index -> token
+            var ready = (function () {
+                var list = [];
+                try { list = JSON.parse(localStorage.getItem('ctf') || '[]'); } catch (e) {}
+                if (!Array.isArray(list) || !hasCrypto) return Promise.resolve();
+                return Promise.all(list.map(function (t) {
+                    if (typeof t !== 'string' || !/^[0-9a-f]{64}$/.test(t)) return null;
+                    return sha256(t).then(function (h) { CTF.forEach(function (c, i) { if (c.chk === h) got[i] = t; }); });
+                }));
+            })();
+            function nSolved() { return Object.keys(got).length; }
+            function saveSolved() {
+                try { localStorage.setItem('ctf', JSON.stringify(Object.keys(got).map(function (k) { return got[k]; }))); } catch (e) {}
+            }
+            // the root password is derived from all six tokens, so only a full solve can produce it
+            function act1Done() { for (var i = 0; i < ACT1; i++) if (got[i] === undefined) return false; return true; }
+            function rootPassword() {
+                return sha256(CTF.slice(0, ACT1).map(function (c, i) { return got[i]; }).join('|')).then(function (h) { return 'r00t-' + h.slice(0, 10); });
+            }
+            // the JWT challenge: an unsigned ("alg": "none") session token, issued once per browser
+            try {
+                if (!localStorage.getItem('session')) {
+                    localStorage.setItem('session', b64url({ alg: 'none', typ: 'JWT' }) + '.' +
+                        b64url({ sub: 'visitor', uid: 1337, role: 'user', iat: Math.floor(Date.now() / 1000) }) + '.');
+                }
+            } catch (e) {}
+
+            // root mode: capturing every flag reveals the root password; `su` + that password gives root@kali:~#
+            var rootMode = false;
+            function promptNodes() {
+                return rootMode ? [span('root@kali', 'p-user'), ':', span('~', 'p-path'), '# ']
+                                : [span('wyserian@kali', 'p-user'), ':', span('~', 'p-path'), '$ '];
+            }
+            function setRoot(on) {
+                rootMode = on;
+                term.classList.toggle('root', on);
+                var p = form.querySelector('.term-prompt');
+                p.textContent = '';
+                promptNodes().forEach(function (x) { p.appendChild(node(typeof x === 'string' ? x.replace(/ $/, '') : x)); });
+                document.getElementById('term-title').textContent = (on ? 'root@kali' : 'wyserian@kali') + ': ~ (terminal)';
+            }
+
+            // ---- ASCII banners (hand-made 5x5 block font) ----
+            var LOGO_ART = ['█   █ █   █  ████ █████ ████  █████  ███  █   █',
+                            '█   █  █ █  █     █     █   █   █   █   █ ██  █',
+                            '█ █ █   █    ███  ████  ████    █   █████ █ █ █',
+                            '█ █ █   █       █ █     █  █    █   █   █ █  ██',
+                            ' █ █    █   ████  █████ █   █ █████ █   █ █   █'];
+            var ROOT_ART = ['████   ███   ███  █████',
+                            '█   █ █   █ █   █   █',
+                            '████  █   █ █   █   █',
+                            '█  █  █   █ █   █   █',
+                            '█   █  ███   ███    █'];
+            function banner(rows, cls) {
+                rows.forEach(function (r) { line(r, cls).setAttribute('aria-hidden', 'true'); });
+                gap();
+            }
+
+            // ---- hidden password prompt (for su): input is never echoed or saved to history ----
+            var pwAsk = null;
+            function askPassword(label) {
+                return settle().then(function () {
+                    return new Promise(function (res) {
+                        pwAsk = { label: label, res: res };
+                        form.querySelector('.term-prompt').textContent = label;
+                        form.classList.add('secret');
+                        form.classList.remove('busy');
+                        setInput('');
+                        scrollEnd();
+                    });
+                });
+            }
+            function answerPassword(v) { // v === null means cancelled (^C / closed)
+                var a = pwAsk;
+                pwAsk = null;
+                form.classList.remove('secret');
+                form.classList.add('busy');
+                setRoot(rootMode); // puts the normal prompt back
+                line(a.label + (v === null ? '^C' : ''), 't-cmd');
+                setInput('');
+                a.res(v);
+            }
+            function box(text) {
+                line('┌────────────────────────────────────┐', 't-ok');
+                line('│' + text + '│', 't-ok');
+                line('└────────────────────────────────────┘', 't-ok');
+            }
+            // act I done: the root password. act II starts in root's notes.
+            function win1() {
+                gap();
+                box('    A C C E S S   G R A N T E D     ');
+                line('Act I complete: ' + ACT1 + ' flags. You think like an attacker.', 't-ok');
+                gap();
+                return rootPassword().then(function (pw) {
+                    line([span('loot', 't-key'), '  root password: ', span(pw, 't-ok')]);
+                    line("type 'su' and enter it to become root. root has more to find.", 't-muted');
+                });
+            }
+            // everything done
+            function win2() {
+                var mail = document.querySelector('.contact-actions a[href^="mailto:"]');
+                gap();
+                box('   F U L L   C O M P R O M I S E    ');
+                line('All ' + CTF.length + ' flags captured. Nothing on this box is hidden from you anymore.', 't-ok');
+                gap();
+                return Promise.resolve().then(function () {
+                    if (mail) {
+                        var href = mail.href.split('?')[0] +
+                            '?subject=' + encodeURIComponent('I captured all ' + CTF.length + ' Wyserian CTF flags') +
+                            '&body=' + encodeURIComponent('Hi Mandar,\n\nI captured all ' + CTF.length + ' flags on wyserian.github.io.\n\nName:\nLinkedIn / GitHub:\n');
+                        line(['Tell me you did it: ', link('email Mandar', href)]);
+                    }
+                });
+            }
+
+            // ---- a tiny fake API for curl: the IDOR and JWT challenges live here ----
+            var HTTP = { 200: 'OK', 400: 'Bad Request', 401: 'Unauthorized', 403: 'Forbidden', 404: 'Not Found', 500: 'Internal Server Error' };
+            function reply(code, body, head, extra) {
+                if (head) {
+                    line('HTTP/1.1 ' + code + ' ' + HTTP[code], code < 300 ? 't-ok' : 't-err');
+                    ['content-type: application/json; charset=utf-8', 'x-powered-by: Express'].concat(extra || [])
+                        .forEach(function (h) { line(h, 't-muted'); });
+                    gap();
+                }
+                JSON.stringify(body, null, 2).split('\n').forEach(function (l) { line(l); });
+            }
+            function api(path, bearer, head) {
+                var p = path.replace(/\/+$/, '');
+                var NEEDS_TLS = { error: 'needs a secure (https) connection' };
+                if (p === '/api') return reply(200, { name: 'wyserian-api', versions: ['v1'] }, head);
+                if (p === '/api/v1') return reply(200, { version: '1.4.2', endpoints: ['GET /api/v1/users/me', 'GET /api/v1/users/{id}', 'GET /api/v1/admin'] }, head);
+                var mu = p.match(/^\/api\/v1\/users\/(me|\d+)$/);
+                if (mu) {
+                    // the bug: any uid is served, whoever asks
+                    var uid = mu[1] === 'me' ? 1337 : parseInt(mu[1], 10), u = DATA.u[uid];
+                    if (!u) return reply(404, { error: 'user not found', uid: uid }, head);
+                    if (u.k && !hasCrypto) return reply(500, NEEDS_TLS, head);
+                    return (u.k ? unlock('users/' + uid, DATA[u.k]) : Promise.resolve(u.t)).then(function (note) {
+                        reply(200, { uid: uid, name: u.n, role: u.r, note: note }, head);
+                    });
+                }
+                if (p === '/api/v1/admin') {
+                    var www = ['www-authenticate: Bearer realm="wyserian-api"'];
+                    if (!bearer) return reply(401, { error: 'missing bearer token' }, head, www);
+                    var hdr, claims;
+                    try { hdr = unb64url(bearer.split('.')[0]); claims = unb64url(bearer.split('.')[1]); }
+                    catch (e) { return reply(400, { error: 'malformed token' }, head); }
+                    // the bug: "alg": "none" skips signature verification; anything else must be signed (and we can't be)
+                    if (String(hdr.alg).toLowerCase() !== 'none') return reply(401, { error: 'invalid signature' }, head, www);
+                    if (String(claims.role).toLowerCase() !== 'admin') return reply(403, { error: 'forbidden', role: claims.role === undefined ? null : claims.role }, head);
+                    if (!hasCrypto) return reply(500, NEEDS_TLS, head);
+                    return unlock('role:admin', DATA.e2).then(function (flag) {
+                        reply(200, { message: 'welcome, ' + (claims.sub || 'admin'), flag: flag }, head);
+                    });
+                }
+                return reply(404, { error: 'not found', path: path }, head);
+            }
+
             // ---- commands ----
             var cmds = {
                 help: { d: 'list commands', run: function () {
                     line('Available commands:', 't-muted');
-                    Object.keys(cmds).forEach(function (k) {
-                        if (cmds[k].hidden) return;
-                        line(['  ', span(pad(k + (cmds[k].a ? ' ' + cmds[k].a : ''), 20), 't-key'), cmds[k].d]);
-                    });
+                    var shown = Object.keys(cmds).filter(function (k) { return !cmds[k].hidden && !(rootMode && k === 'exit'); }); // root's exit is listed below
+                    function usage(k) { return k + (cmds[k].a ? ' ' + cmds[k].a : ''); }
+                    var w = Math.max.apply(null, shown.map(function (k) { return usage(k).length; })) + 2;
+                    shown.forEach(function (k) { line(['  ', span(pad(usage(k), w), 't-key'), cmds[k].d]); });
+                    if (rootMode) {
+                        gap();
+                        line('Root commands:', 't-muted');
+                        [['id', 'print user and group ids'], ['cat /root/notes.txt', "root's private notes"], ['cat /etc/shadow', 'read the password hashes'],
+                         ['uname -a', 'kernel and system info'], ['nmap', 'scan this site'], ['matrix', 'follow the white rabbit'],
+                         ['sudo <command>', 'run anything, no questions asked'], ['ctf --reset', 'wipe CTF progress'],
+                         ['exit', 'leave the root shell']].forEach(function (r) {
+                            line(['  ', span(pad(r[0], w), 't-key'), r[1]]);
+                        });
+                    }
                     gap();
-                    line('Tab completes · ↑/↓ history · Ctrl+L clears · Esc closes', 't-muted');
+                    line('Tab completes · ↑/↓ history · Ctrl+C interrupts · Ctrl+L clears · Esc closes', 't-muted');
                     line('psst... not every command is listed here.', 't-muted');
                 } },
                 whoami: { d: 'who is this', run: function () {
@@ -1573,8 +2001,9 @@
                     line('opening resume.pdf ...', 't-ok');
                     setTimeout(function () { close(false); openResume(); }, 350);
                 } },
-                ls: { d: 'list sections', run: function () {
+                ls: { d: 'list sections', run: function (args) {
                     var parts = [];
+                    if (/^-\w*a/.test(args[0] || '')) parts.push(span('.bash_history', 't-muted'), '  ', span('.secret', 't-muted'), '  ');
                     SECTIONS.forEach(function (s) { parts.push(span(s + '/', 't-key'), '  '); });
                     parts.push('resume.pdf');
                     line(parts);
@@ -1583,7 +2012,7 @@
                     var t = (args[0] || '~').replace(/\/+$/, '').toLowerCase();
                     var id = (t === '~' || t === '/' || t === '..' || t === 'home') ? 'home' : t;
                     if (id !== 'home' && SECTIONS.indexOf(id) < 0) {
-                        return line('cd: no such file or directory: ' + args[0], 't-err');
+                        return line('bash: cd: ' + args[0] + ': No such file or directory', 't-err');
                     }
                     close(false);
                     location.hash = '#' + id;
@@ -1595,14 +2024,26 @@
                     var f = (args[0] || '').replace(/\/+$/, '').toLowerCase();
                     if (!f) return line('usage: cat <file>   (try: ls)', 't-muted');
                     if (f === 'resume.pdf' || f === 'resume') return cmds.resume.run([]);
+                    if (f === '.secret') return line(DATA.s);
+                    if (f === '.bash_history') return DATA.bh.forEach(function (h) { line(h, 't-muted'); });
+                    if (f === '/root/notes.txt') {
+                        if (!rootMode) return line('cat: /root/notes.txt: Permission denied', 't-err');
+                        return DATA.rn.forEach(function (l) { line(l); });
+                    }
+                    if (f === '/etc/shadow') {
+                        if (!rootMode) return line('cat: /etc/shadow: Permission denied', 't-err');
+                        return ['root:$y$j9T$t00r.s4lt$Zm9sbG93LnRoZS53aGl0ZS5yYWJiaXQ:20400:0:99999:7:::',
+                                'wyserian:$y$j9T$wys3r$aGFjay50aGUucGxhbmV0:20400:0:99999:7:::',
+                                'visitor:!:20400::::::'].forEach(function (l) { line(l); });
+                    }
                     if (SECTIONS.indexOf(f) >= 0) return cmds[f].run([]);
                     line('cat: ' + args[0] + ': No such file or directory', 't-err');
                 } },
-                theme: { a: '[dark|light]', d: 'switch color theme', run: function (args) {
-                    var cur = root.getAttribute('data-theme') === 'light' ? 'light' : 'dark';
+                theme: { a: '[dark|light|phosphor]', d: 'switch color theme', run: function (args) {
+                    var cur = root.getAttribute('data-theme');
                     var want = (args[0] || (cur === 'light' ? 'dark' : 'light')).toLowerCase();
-                    if (want !== 'dark' && want !== 'light') return line('theme: expected dark or light', 't-err');
-                    if (want !== cur) toggle.click();
+                    if (!/^(dark|light|phosphor)$/.test(want)) return line('theme: expected dark, light or phosphor', 't-err');
+                    setTheme(want);
                     line('theme set to ' + want, 't-ok');
                 } },
                 date: { d: 'time in Mumbai', run: function () { line(IST.format(new Date()) + ' IST'); } },
@@ -1610,19 +2051,126 @@
                 history: { d: "commands you've run", run: function () {
                     history.forEach(function (h, i) { line([span(pad(String(i + 1), 5), 't-muted'), h]); });
                 } },
-                clear: { d: 'clear the screen', run: function () { out.textContent = ''; } },
-                exit: { d: 'close the terminal', run: function () { close(true); } },
+                curl: { a: '[-i] [-H <header>] <url>', d: 'transfer a URL', run: function (args) {
+                    var raw = args.join(' ');
+                    var bearer = (raw.match(/authorization:\s*bearer\s+([\w\-.]+)/i) || [])[1] || null;
+                    var head = args.some(function (a) { return a === '--include' || /^-[a-z]*i[a-z]*$/i.test(a); });
+                    var toks = raw.replace(/(-H|--header)\s+("[^"]*"|'[^']*'|\S+)/gi, ' ').split(/\s+/)
+                        .filter(function (t) { return t && t[0] !== '-'; });
+                    var url = toks.filter(function (t) { return /^(https?:\/\/|\/|localhost|127\.0\.0\.1)/i.test(t); })[0] || toks[0];
+                    if (!url) return line("curl: try 'curl <url>', e.g. curl /robots.txt", 't-muted');
+                    var m = url.match(/^(?:https?:\/\/)?([^\/]*)(\/.*)?$/i);
+                    var host = url[0] === '/' ? '' : m[1].replace(/:\d+$/, '').toLowerCase();
+                    var path = ((url[0] === '/' ? url : m[2]) || '/').split(/[?#]/)[0];
+                    if (host && ['localhost', '127.0.0.1', 'wyserian.github.io', location.hostname].indexOf(host) < 0) {
+                        return line('curl: (6) Could not resolve host: ' + host, 't-err');
+                    }
+                    if (/^\/api(\/|$)/.test(path)) return api(path, bearer, head);
+                    // anything else: the real file from this site
+                    return fetch(path, { cache: 'no-store' }).then(function (r) {
+                        if (head) {
+                            line('HTTP/1.1 ' + r.status + ' ' + (r.statusText || HTTP[r.status] || ''), r.ok ? 't-ok' : 't-err');
+                            line('content-type: ' + (r.headers.get('content-type') || ''), 't-muted');
+                            gap();
+                        }
+                        if (!r.ok) return line('curl: (22) The requested URL returned error: ' + r.status, 't-err');
+                        return r.text().then(function (t) {
+                            var rows = t.replace(/\n$/, '').split('\n'), MAX = 60;
+                            rows.slice(0, MAX).forEach(function (l) { line(l); });
+                            if (rows.length > MAX) line('... (' + (rows.length - MAX) + ' more lines)', 't-muted');
+                        });
+                    }).catch(function () { line('curl: (7) Failed to connect to ' + (host || location.host), 't-err'); });
+                } },
+                ctf: { d: 'capture-the-flag challenges', run: function (args) {
+                    if (args[0] === '--reset') {
+                        if (!rootMode) return line('ctf: --reset: Permission denied (only root can do that)', 't-err');
+                        got = {};
+                        saveSolved();
+                        setRoot(false);
+                        return line('ctf: progress wiped. dropped back to a normal user.', 't-muted');
+                    }
+                    line([span('Wyserian CTF', 't-ok'), '  ·  ' + CTF.length + ' flags hidden across this site  ·  format: wyserian{...}']);
+                    gap();
+                    CTF.forEach(function (c, i) {
+                        // the category is a clue; the exact name stays hidden until it's captured
+                        var done = got[i] !== undefined, nm = DATA.n[i];
+                        line([span(done ? '[x] ' : '[ ] ', done ? 't-ok' : 't-muted'), span(pad(two(i + 1), 4), 't-muted'),
+                              span(pad(done ? nm[0] : '??????????', 15), done ? 't-ok' : 't-muted'), span(pad(nm[1], 12), 't-muted'),
+                              span(c.sev, /high|critical|hard|insane/.test(c.sev) ? 't-err' : 't-key')]);
+                    });
+                    gap();
+                    line(nSolved() + '/' + CTF.length + ' captured  ·  submit <flag>  ·  hint <n>', 't-muted');
+                    if (act1Done()) return rootPassword().then(function (pw) {
+                        line(['root password: ', span(pw, 't-ok'), "  ·  use it with 'su'"], 't-muted');
+                    });
+                } },
+                submit: { a: '<flag>', d: 'submit a captured flag', run: function (args) {
+                    var guess = args.join(' ').trim();
+                    if (!guess) return line('usage: submit wyserian{...}', 't-muted');
+                    if (!hasCrypto) return line('submit: needs a secure (https) connection', 't-err');
+                    return sha256(guess).then(function (h) {
+                        var i = -1;
+                        CTF.forEach(function (c, k) { if (c.hash === h) i = k; });
+                        if (i < 0) return line('✘ not a valid flag. keep digging.', 't-err');
+                        if (got[i] !== undefined) return line('already captured: flag ' + two(i + 1) + ' (' + DATA.n[i][0] + ')', 't-muted');
+                        return sha256('ctf:' + guess).then(function (t) {
+                            got[i] = t;
+                            saveSolved();
+                            line('✔ flag ' + two(i + 1) + ' captured: ' + DATA.n[i][0] + '  (' + nSolved() + '/' + CTF.length + ')', 't-ok');
+                            var next = Promise.resolve();
+                            if (i < ACT1 && act1Done()) next = next.then(win1); // this capture finished act I
+                            if (nSolved() === CTF.length) next = next.then(win2);
+                            return next;
+                        });
+                    });
+                } },
+                hint: { a: '<n>', d: 'a nudge for a CTF challenge', run: function (args) {
+                    var n = parseInt(args[0], 10);
+                    if (!(n >= 1 && n <= CTF.length)) return line('usage: hint <1-' + CTF.length + '>   (see: ctf)', 't-muted');
+                    line([span('hint ' + two(n) + ': ', 't-key'), DATA.h[n - 1]]);
+                } },
+                su: { a: '[-] [root]', d: 'switch to root (needs the password)', run: function (args) {
+                    var who = args.filter(function (x) { return !/^-/.test(x); })[0] || 'root';
+                    if (who !== 'root') return line('su: user ' + who + ' does not exist or the user entry does not contain all the required fields', 't-err');
+                    if (rootMode) return;
+                    return askPassword('Password:').then(function (pw) {
+                        if (pw === null) return;
+                        // only the hash is known here; the password itself comes from solving everything
+                        return (hasCrypto ? sha256(pw) : Promise.resolve('')).then(function (h) {
+                            if (h === ROOT_HASH && act1Done()) {
+                                banner(ROOT_ART, 't-banner t-err');
+                                return after(function () { setRoot(true); });
+                            }
+                            return new Promise(function (res) { setTimeout(res, 900); }).then(function () {
+                                line('su: Authentication failure', 't-err');
+                            });
+                        });
+                    });
+                } },
+                clear: { d: 'clear the screen', run: function () { clearScreen(); } },
+                exit: { d: 'close the terminal', run: function () {
+                    if (rootMode) return setRoot(false); // like a real su shell: exit returns to your user
+                    close(true);
+                } },
                 // easter eggs: work, but stay out of `help`
+                id: { hidden: true, run: function () {
+                    line(rootMode ? 'uid=0(root) gid=0(root) groups=0(root)' : 'uid=1337(visitor) gid=1337(visitor) groups=1337(visitor)');
+                } },
                 sudo: { hidden: true, run: function (args) {
                     if (/^hire[-\s]?me$/i.test(args.join(' '))) {
                         line('[sudo] password for visitor: ********', 't-muted');
                         line('access granted. opening résumé ...', 't-ok');
                         setTimeout(function () { close(false); openResume(); }, 900);
+                    } else if (rootMode) {
+                        var n = (args[0] || '').toLowerCase();
+                        if (!n) return line('usage: sudo <command>', 't-muted');
+                        if (!cmds.hasOwnProperty(n)) return line('sudo: ' + args[0] + ': command not found', 't-err');
+                        return cmds[n].run(args.slice(1));
                     } else {
                         line('visitor is not in the sudoers file. This incident will be reported.', 't-err');
                     }
                 } },
-                rm: { hidden: true, run: function () { line("rm: cannot remove '/': Permission denied. Nice try.", 't-err'); } },
+                rm: { hidden: true, run: function () { line("rm: cannot remove '/': Permission denied", 't-err'); } },
                 hack: { hidden: true, run: function () { line('Already on it. Try `projects` to see what I break and build.', 't-ok'); } },
                 matrix: { hidden: true, run: function () {
                     if (reduceMotion) return line('matrix: skipped, your device prefers reduced motion', 't-muted');
@@ -1647,15 +2195,32 @@
                 quit: { hidden: true, run: function () { close(true); } }
             };
 
+            // ---- running commands: one at a time; anything typed meanwhile waits its turn ----
+            var running = false, pending = [];
             function exec(raw) {
                 var cmdLine = raw.trim();
-                line([span('wyserian@kali', 'p-user'), ':', span('~', 'p-path'), '$ ', cmdLine], 't-cmd');
-                if (!cmdLine) return;
+                line(promptNodes().concat([raw]), 't-cmd');
+                if (!cmdLine) return Promise.resolve();
                 history.push(cmdLine); hIdx = history.length;
                 var parts = cmdLine.split(/\s+/), name = parts[0].toLowerCase();
-                if (cmds.hasOwnProperty(name)) cmds[name].run(parts.slice(1));
-                else line('command not found: ' + parts[0] + "  ·  type 'help'", 't-err');
-                scroller.scrollTop = scroller.scrollHeight;
+                if (!cmds.hasOwnProperty(name)) { line('bash: ' + parts[0] + ': command not found', 't-err'); return Promise.resolve(); }
+                // saved CTF progress is verified asynchronously; never run a command before that's done
+                return ready.then(function () { return cmds[name].run(parts.slice(1)); });
+            }
+            function drain() {
+                if (running || !pending.length) return;
+                running = true;
+                form.classList.add('busy');
+                exec(pending.shift())
+                    .catch(function () { line('bash: something went wrong', 't-err'); })
+                    .then(settle)
+                    .then(function () {
+                        running = false;
+                        if (pending.length) return drain();
+                        form.classList.remove('busy');
+                        scrollEnd();
+                        syncCursor();
+                    });
             }
 
             function complete() {
@@ -1671,10 +2236,10 @@
                 var hits = pool.filter(function (k) { return k.indexOf(prefix) === 0; });
                 if (hits.length === 1) {
                     parts[parts.length - 1] = hits[0];
-                    input.value = parts.join(' ') + ' ';
+                    setInput(parts.join(' ') + ' ');
                 } else if (hits.length > 1) {
+                    line(promptNodes().concat([v]), 't-cmd'); // like bash: show the options under the current line
                     line(hits.join('   '), 't-muted');
-                    scroller.scrollTop = scroller.scrollHeight;
                 }
             }
 
@@ -1689,14 +2254,17 @@
                 regions.forEach(function (el) { el.inert = true; });
                 if (!booted) {
                     booted = true;
+                    banner(LOGO_ART, 't-banner');
                     line('Last login: ' + IST.format(new Date()) + ' IST on ttys001', 't-muted');
                     line([span('wyserian shell', 't-ok'), "  ·  type 'help' to see what you can do"]);
                 }
-                scroller.scrollTop = scroller.scrollHeight;
+                scrollEnd();
                 input.focus();
+                syncCursor();
             }
             function close(restoreFocus) {
                 if (term.hidden) return;
+                if (pwAsk) answerPassword(null);
                 term.hidden = true;
                 document.body.classList.remove('modal-open');
                 regions.forEach(function (el) { el.inert = false; });
@@ -1709,18 +2277,30 @@
                 // click anywhere in the window focuses the prompt, unless selecting text or on a link
                 if (!e.target.closest('a') && !String(window.getSelection())) input.focus();
             });
-            form.addEventListener('submit', function (e) { e.preventDefault(); exec(input.value); input.value = ''; });
+            form.addEventListener('submit', function (e) {
+                e.preventDefault();
+                if (pwAsk) return answerPassword(input.value);
+                pending.push(input.value);
+                setInput('');
+                drain();
+            });
             input.addEventListener('keydown', function (e) {
+                if (pwAsk) { // at the password prompt: no history, no completion; Ctrl+C cancels
+                    if (e.key === 'c' && e.ctrlKey) { e.preventDefault(); answerPassword(null); }
+                    else if (/^(Tab|ArrowUp|ArrowDown)$/.test(e.key)) e.preventDefault();
+                    return;
+                }
                 if (e.key === 'Tab') { e.preventDefault(); complete(); }
                 else if (e.key === 'ArrowUp') {
                     if (!history.length) return;
-                    e.preventDefault(); hIdx = Math.max(0, hIdx - 1); input.value = history[hIdx];
+                    e.preventDefault(); hIdx = Math.max(0, hIdx - 1); setInput(history[hIdx]);
                 } else if (e.key === 'ArrowDown') {
-                    e.preventDefault(); hIdx = Math.min(history.length, hIdx + 1); input.value = history[hIdx] || '';
-                } else if (e.key === 'l' && e.ctrlKey) { e.preventDefault(); out.textContent = ''; }
+                    e.preventDefault(); hIdx = Math.min(history.length, hIdx + 1); setInput(history[hIdx] || '');
+                } else if (e.key === 'l' && e.ctrlKey) { e.preventDefault(); clearScreen(); }
                 else if (e.key === 'c' && e.ctrlKey && !String(window.getSelection())) {
-                    e.preventDefault(); line([span('wyserian@kali', 'p-user'), ':', span('~', 'p-path'), '$ ', input.value, '^C'], 't-cmd');
-                    input.value = '';
+                    e.preventDefault();
+                    if (running) { dropOutput(); pending.length = 0; line('^C', 't-muted'); } // interrupt the running command
+                    else { line(promptNodes().concat([input.value + '^C']), 't-cmd'); setInput(''); }
                 }
             });
             document.addEventListener('keydown', function (e) {
@@ -1864,8 +2444,74 @@
             });
         })();
 
+        // Vim keys: j/k sections, gg/G top/bottom, : terminal, ? cheat sheet
+        (function () {
+            var keys = document.getElementById('keys'), term = document.getElementById('term');
+            var secs = [].slice.call(document.querySelectorAll('main section[id]'));
+            var target = -1, targetAt = 0, lastG = 0;
+            function current() {
+                // while a j/k scroll is still gliding, count from where it is headed
+                if (performance.now() - targetAt < 700) return target;
+                var y = window.scrollY + head.offsetHeight + 24, idx = 0;
+                secs.forEach(function (s, i) { if (s.offsetTop <= y) idx = i; });
+                return idx;
+            }
+            function go(i) {
+                target = Math.max(0, Math.min(secs.length - 1, i)); targetAt = performance.now();
+                secs[target].scrollIntoView({ behavior: reduceMotion ? 'auto' : 'smooth', block: 'start' });
+            }
+            keys.addEventListener('click', function (e) { if (e.target === keys) keys.close(); }); // click outside closes
+            document.addEventListener('keydown', function (e) {
+                var t = e.target;
+                if (e.ctrlKey || e.metaKey || e.altKey || t.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(t.tagName)) return;
+                if (!term.hidden || resumeModal.classList.contains('open') || keys.open) return;
+                var k = e.key;
+                if (k === 'j') go(current() + 1);
+                else if (k === 'k') go(current() - 1);
+                else if (k === 'G') { target = secs.length - 1; targetAt = performance.now(); window.scrollTo({ top: root.scrollHeight, behavior: reduceMotion ? 'auto' : 'smooth' }); }
+                else if (k === 'g') {
+                    if (performance.now() - lastG < 500) { lastG = 0; go(0); } else { lastG = performance.now(); return; }
+                }
+                else if (k === ':') document.getElementById('term-btn').click();
+                else if (k === '?') keys.showModal();
+                else return;
+                e.preventDefault();
+            });
+        })();
+
+        // Leave the tab: the title cries for help and the favicon becomes a blinking prompt
+        (function () {
+            var title = document.title, saved = null, blink = 0, restore = 0;
+            function icon(cursor) {
+                return 'data:image/svg+xml,' + encodeURIComponent(
+                    '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32"><rect width="32" height="32" rx="7" fill="#0b0d12"/>' +
+                    '<path d="M8 10l6 6-6 6" fill="none" stroke="#3ecf8e" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/>' +
+                    (cursor ? '<rect x="16" y="20" width="9" height="3" rx="1" fill="#3ecf8e"/>' : '') + '</svg>');
+            }
+            var ON = icon(true), OFF = icon(false), tmp = document.createElement('link');
+            tmp.rel = 'icon'; tmp.type = 'image/svg+xml';
+            document.addEventListener('visibilitychange', function () {
+                clearTimeout(restore); clearInterval(blink);
+                if (document.hidden) {
+                    document.title = '[!] connection lost...';
+                    // swap all icons for ours; a lone icon link is the only one browsers will use
+                    saved = [].slice.call(document.querySelectorAll('link[rel~="icon"]'));
+                    saved.forEach(function (l) { l.remove(); });
+                    tmp.href = ON; document.head.appendChild(tmp);
+                    var on = true;
+                    if (!reduceMotion) blink = setInterval(function () { on = !on; tmp.href = on ? ON : OFF; }, 800);
+                } else {
+                    tmp.remove();
+                    (saved || []).forEach(function (l) { document.head.appendChild(l); });
+                    document.title = '[+] session restored';
+                    restore = setTimeout(function () { document.title = title; }, 1600);
+                }
+            });
+        })();
+
         // A hello for anyone reading the console
         console.log('%c wyserian@kali:~$ whoami ', 'background:#0b0d12;color:#3ecf8e;font:600 13px monospace;padding:6px 4px;border-radius:4px');
+        console.log('%c🏁 10 flags are hidden on this site. Open the terminal ( ` ) and type: ctf', 'color:#3ecf8e;font:12px monospace');
         console.log('%cMandar Patkar · security researcher & pentester.\nFound something? → mandar108@protonmail.com', 'color:#4f8ef7;font:12px monospace');
     </script>
 

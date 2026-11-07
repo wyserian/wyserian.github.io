@@ -1,0 +1,19 @@
+/* TEAM */
+Developer: Mandar Patkar (wyserian)
+Role: Security researcher, penetration tester, developer
+Location: Mumbai, India
+Site: https://wyserian.github.io
+
+/* THANKS */
+Coffee, curiosity, and everyone who reads files like this one.
+
+/* SITE */
+Last update: 2026/11/07
+Standards: HTML5, CSS3, ES5
+Components: one file, no frameworks
+Software: vim, git, a terminal
+
+/* NOTE */
+dseeeahh{h1g3a3j3_u3p3d_d13f}
+dhmf dbgy: nmkr loy nuvdk, nte nhp pqrfavh mnq loy weeflf heekpiz. nheiyds bfss, vovflx iigz wcbef.
+kou256 ut, xwlj fhr xplet faenqea, sux irnh pn xixw abq ogzlle.

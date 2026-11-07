@@ -1,0 +1,9 @@
+# ============================================
+#  app.config backup  (do NOT deploy this)
+# ============================================
+APP_ENV=production
+DB_HOST=10.13.37.42
+DB_USER=wyserian_app
+DB_PASS=correct-horse-battery-staple
+BACKUP_ENCRYPTION_KEY=d3lzZXJpYW57cjBiMHRzX3R4dF8xc19uMHRfNGNjM3NzX2MwbnRyMGx9
+# note to self: robots.txt hides nothing from humans
